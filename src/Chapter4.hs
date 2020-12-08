@@ -114,22 +114,30 @@ As always, try to guess the output first! And don't forget to insert
 the output in here:
 
 >>> :k Char
+Char :: *
 
 >>> :k Bool
+Bool :: *
 
 >>> :k [Int]
+[Int] :: *
 
 >>> :k []
+[] :: * -> *
 
 >>> :k (->)
+(->) :: * -> * -> *
 
 >>> :k Either
+Either :: * -> * -> *
 
 >>> data Trinity a b c = MkTrinity a b c
 >>> :k Trinity
+Trinity :: * -> * -> * -> *
 
 >>> data IntBox f = MkIntBox (f Int)
 >>> :k IntBox
+IntBox :: (* -> *) -> *
 
 -}
 
@@ -282,7 +290,6 @@ data Secret e a
     | Reward a
     deriving (Show, Eq)
 
-
 {- |
 Functor works with types that have kind `* -> *` but our 'Secret' has
 kind `* -> * -> *`. What should we do? Don't worry. We can partially
@@ -293,7 +300,8 @@ values and apply them to the type level?
 -}
 instance Functor (Secret e) where
     fmap :: (a -> b) -> Secret e a -> Secret e b
-    fmap = error "fmap for Box: not implemented!"
+    fmap _ (Trap t) = Trap t
+    fmap f (Reward r) = Reward (f r)
 
 {- |
 =⚔️= Task 3
@@ -306,6 +314,12 @@ typeclasses for standard data types.
 data List a
     = Empty
     | Cons a (List a)
+      deriving Show
+
+instance Functor List where
+  fmap :: (a -> b) -> List a -> List b
+  fmap _ Empty = Empty
+  fmap f (Cons n l) = Cons (f n) $ fmap f l
 
 {- |
 =🛡= Applicative
@@ -472,10 +486,12 @@ Implement the Applicative instance for our 'Secret' data type from before.
 -}
 instance Applicative (Secret e) where
     pure :: a -> Secret e a
-    pure = error "pure Secret: Not implemented!"
+    pure = Reward
 
     (<*>) :: Secret e (a -> b) -> Secret e a -> Secret e b
-    (<*>) = error "(<*>) Secret: Not implemented!"
+    (<*>) (Reward f) (Reward x) = Reward (f x)
+    (<*>) (Reward _) (Trap x) = Trap x
+    (<*>) (Trap x) _ = Trap x
 
 {- |
 =⚔️= Task 5
@@ -488,6 +504,18 @@ Implement the 'Applicative' instance for our 'List' type.
   may also need to implement a few useful helper functions for our List
   type.
 -}
+instance Applicative List where -- Cheated from: https://bit.ly/3mYqyky
+  pure :: a -> List a
+  pure x = Cons x Empty
+
+  (<*>) :: List (a -> b) -> List a -> List b
+  (<*>) _ Empty = Empty
+  (<*>) Empty _ = Empty
+  (<*>) (Cons f fs) l = append (fmap f l) (fs <*> l)
+
+append :: List a -> List a -> List a
+append Empty ys = ys
+append (Cons x xs) ys = Cons x (append xs ys)
 
 
 {- |
@@ -600,7 +628,8 @@ Implement the 'Monad' instance for our 'Secret' type.
 -}
 instance Monad (Secret e) where
     (>>=) :: Secret e a -> (a -> Secret e b) -> Secret e b
-    (>>=) = error "bind Secret: Not implemented!"
+    (>>=) (Trap x) _ = Trap x
+    (>>=) (Reward x) f = f x
 
 {- |
 =⚔️= Task 7
@@ -610,7 +639,13 @@ Implement the 'Monad' instance for our lists.
 🕯 HINT: You probably will need to implement a helper function (or
   maybe a few) to flatten lists of lists to a single list.
 -}
+instance Monad List where -- Cheated from: https://bit.ly/3mYqyky
+  (>>=) :: List a -> (a -> List b) -> List b
+  l >>= f = concatList (fmap f l)
 
+concatList :: List (List a) -> List a
+concatList Empty = Empty
+concatList (Cons x xs) = append x (concatList xs)
 
 {- |
 =💣= Task 8*: Before the Final Boss
@@ -629,7 +664,8 @@ Can you implement a monad version of AND, polymorphic over any monad?
 🕯 HINT: Use "(>>=)", "pure" and anonymous function
 -}
 andM :: (Monad m) => m Bool -> m Bool -> m Bool
-andM = error "andM: Not implemented!"
+-- andM m1 m2 = m1 >>= (\b -> pure ((&&) b) <*> m2) -- First try
+andM ma mb = ma >>= \a -> if a then mb else pure False
 
 {- |
 =🐉= Task 9*: Final Dungeon Boss
@@ -672,7 +708,22 @@ Specifically,
    subtree of a tree
  ❃ Implement the function to convert Tree to list
 -}
+data Tree a = Leaf
+            | Node a (Tree a) (Tree a)
+            deriving Show
 
+instance Functor Tree where
+  fmap :: (a -> b) -> Tree a -> Tree b
+  fmap _ Leaf = Leaf
+  fmap f (Node x left right) = Node (f x) (fmap f left) (fmap f right)
+
+reverseTree :: Tree a -> Tree a
+reverseTree Leaf = Leaf
+reverseTree (Node x left right) = Node x (reverseTree right) (reverseTree left)
+
+toList :: Tree a -> [a]
+toList Leaf = []
+toList (Node x left right) = [x] ++ toList left ++ toList right
 
 {-
 You did it! Now it is time to open pull request with your changes
